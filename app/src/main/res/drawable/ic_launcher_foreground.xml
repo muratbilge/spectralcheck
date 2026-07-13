@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- Stylized spectrum bars -->
+    <path android:fillColor="#FF7A18" android:pathData="M34,72 L34,48 L38,48 L38,72 Z" />
+    <path android:fillColor="#FFB300" android:pathData="M42,72 L42,38 L46,38 L46,72 Z" />
+    <path android:fillColor="#FFD54F" android:pathData="M50,72 L50,30 L54,30 L54,72 Z" />
+    <path android:fillColor="#FFB300" android:pathData="M58,72 L58,42 L62,42 L62,72 Z" />
+    <path android:fillColor="#FF7A18" android:pathData="M66,72 L66,54 L70,54 L70,72 Z" />
+</vector>
