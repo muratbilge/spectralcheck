@@ -110,6 +110,9 @@ class FlacDecoder(private val context: Context) {
         var sampleRate = inputFormat.getInteger(MediaFormat.KEY_SAMPLE_RATE)
         var channels = inputFormat.getInteger(MediaFormat.KEY_CHANNEL_COUNT)
         var pcmEncoding = AudioFormat.ENCODING_PCM_16BIT
+        var encodingVerified = false
+        var encodingCorrected = false
+        var peak = 0f
         var firstPtsUs = -1L
 
         while (!outputDone) {
@@ -145,13 +148,40 @@ class FlacDecoder(private val context: Context) {
                     if (bufferInfo.size > 0) {
                         outBuf.position(bufferInfo.offset)
                         outBuf.limit(bufferInfo.offset + bufferInfo.size)
-                        val interleaved = if (pcmEncoding == AudioFormat.ENCODING_PCM_FLOAT) {
-                            val fb = outBuf.order(ByteOrder.nativeOrder()).asFloatBuffer()
-                            FloatArray(fb.remaining()).also { fb.get(it) }
-                        } else {
-                            val sb = outBuf.order(ByteOrder.nativeOrder()).asShortBuffer()
-                            val shorts = ShortArray(sb.remaining()).also { sb.get(it) }
-                            FloatArray(shorts.size) { shorts[it] / 32768f }
+                        outBuf.order(ByteOrder.nativeOrder())
+
+                        // Some codecs echo "float" in the output format while
+                        // actually emitting 16-bit data; reading shorts as
+                        // float bit patterns yields near-zero garbage. Once a
+                        // buffer has real energy, verify which interpretation
+                        // is plausible and lock it in.
+                        if (!encodingVerified && pcmEncoding == AudioFormat.ENCODING_PCM_FLOAT) {
+                            val fb = outBuf.duplicate().order(ByteOrder.nativeOrder()).asFloatBuffer()
+                            var pf = 0f
+                            while (fb.hasRemaining()) {
+                                val v = Math.abs(fb.get())
+                                if (v.isFinite() && v > pf) pf = v
+                            }
+                            val sb = outBuf.duplicate().order(ByteOrder.nativeOrder()).asShortBuffer()
+                            var ps = 0f
+                            while (sb.hasRemaining()) {
+                                val v = Math.abs(sb.get() / 32768f)
+                                if (v > ps) ps = v
+                            }
+                            if (pf > 1e-6f || ps > 1e-4f) {
+                                if (pf < 1e-6f || pf > 100f) {
+                                    pcmEncoding = AudioFormat.ENCODING_PCM_16BIT
+                                    encodingCorrected = true
+                                }
+                                encodingVerified = true
+                            }
+                        }
+
+                        val interleaved = readPcm(outBuf, pcmEncoding)
+
+                        for (v in interleaved) {
+                            val a = Math.abs(v)
+                            if (a > peak) peak = a
                         }
 
                         val frames = interleaved.size / channels.coerceAtLeast(1)
@@ -210,11 +240,19 @@ class FlacDecoder(private val context: Context) {
                 totalSamples * 1000 / sampleRate
             }
 
+        val peakDb = if (peak > 0f) 20.0 * Math.log10(peak.toDouble()) else Double.NEGATIVE_INFINITY
+        val decoderOutput = buildString {
+            append(pcmName(pcmEncoding))
+            if (encodingCorrected) append(" (corrected from float)")
+            append(if (peakDb.isFinite()) ", peak %.1f dB".format(peakDb) else ", silent")
+        }
+
         val info = AudioInfo(
             sampleRate = sampleRate,
             channels = headerInfo?.channels ?: channels,
             bitDepth = headerInfo?.bitDepth ?: 16,
             durationMs = durationMs,
+            decoderOutput = decoderOutput,
         )
         return DecodedAudio(
             samples = concat(monoChunks),
@@ -223,5 +261,45 @@ class FlacDecoder(private val context: Context) {
             info = info,
             floatOutput = pcmEncoding == AudioFormat.ENCODING_PCM_FLOAT,
         )
+    }
+
+    /** Reads an output buffer as normalized floats for any PCM encoding. */
+    private fun readPcm(buf: java.nio.ByteBuffer, encoding: Int): FloatArray {
+        return when (encoding) {
+            AudioFormat.ENCODING_PCM_FLOAT -> {
+                val fb = buf.asFloatBuffer()
+                FloatArray(fb.remaining()).also { fb.get(it) }
+            }
+            AudioFormat.ENCODING_PCM_32BIT -> {
+                val ib = buf.asIntBuffer()
+                val scale = 1f / 2147483648f
+                FloatArray(ib.remaining()) { ib.get() * scale }
+            }
+            AudioFormat.ENCODING_PCM_24BIT_PACKED -> {
+                val n = buf.remaining() / 3
+                val out = FloatArray(n)
+                val scale = 1f / 8388608f
+                for (i in 0 until n) {
+                    val b0 = buf.get().toInt() and 0xFF
+                    val b1 = buf.get().toInt() and 0xFF
+                    val b2 = buf.get().toInt() // sign byte
+                    out[i] = ((b2 shl 16) or (b1 shl 8) or b0) * scale
+                }
+                out
+            }
+            else -> {
+                val sb = buf.asShortBuffer()
+                val scale = 1f / 32768f
+                FloatArray(sb.remaining()) { sb.get() * scale }
+            }
+        }
+    }
+
+    private fun pcmName(encoding: Int): String = when (encoding) {
+        AudioFormat.ENCODING_PCM_FLOAT -> "float PCM"
+        AudioFormat.ENCODING_PCM_32BIT -> "32-bit PCM"
+        AudioFormat.ENCODING_PCM_24BIT_PACKED -> "24-bit PCM"
+        AudioFormat.ENCODING_PCM_16BIT -> "16-bit PCM"
+        else -> "PCM enc $encoding"
     }
 }

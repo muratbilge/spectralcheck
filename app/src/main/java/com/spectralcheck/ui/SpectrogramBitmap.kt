@@ -9,12 +9,23 @@ object SpectrogramBitmap {
     private const val MAX_WIDTH = 4096
     private const val MAX_HEIGHT = 1024
 
+    /**
+     * Picks the top of the dB color range: 0 dBFS for normal content, lower
+     * for quiet material (or misbehaving decoders) so the image is never
+     * uniformly black.
+     */
+    fun autoCeil(data: SpectrogramData): Float {
+        val max = data.averageSpectrumDb().max()
+        return if (max < -20f) (max + 10f).coerceIn(-60f, 0f) else 0f
+    }
+
     fun render(
         data: SpectrogramData,
         palette: Array<FloatArray> = Palettes.INFERNO,
-        dbFloor: Float = -100f,
-        dbCeil: Float = 0f,
+        dbCeil: Float = autoCeil(data),
+        dbSpan: Float = 100f,
     ): Bitmap {
+        val dbFloor = dbCeil - dbSpan
         val frames = data.frames
         val bins = data.binCount
         require(frames.isNotEmpty() && bins > 0) { "Empty spectrogram" }

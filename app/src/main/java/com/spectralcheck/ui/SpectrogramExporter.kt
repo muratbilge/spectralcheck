@@ -18,8 +18,7 @@ import com.spectralcheck.analysis.Verdict
  */
 object SpectrogramExporter {
 
-    private const val DB_FLOOR = -120f
-    private const val DB_CEIL = 0f
+    private const val DB_SPAN = 120f
 
     private const val SPEC_W = 1400
     private const val SPEC_H = 700
@@ -29,7 +28,8 @@ object SpectrogramExporter {
     private const val MARGIN_B = 130f
 
     fun render(result: AnalysisResult): Bitmap {
-        val spec = SpectrogramBitmap.render(result.spectrogram, Palettes.SOX, DB_FLOOR, DB_CEIL)
+        val dbCeil = SpectrogramBitmap.autoCeil(result.spectrogram)
+        val spec = SpectrogramBitmap.render(result.spectrogram, Palettes.SOX, dbCeil, DB_SPAN)
 
         val width = (MARGIN_L + SPEC_W + MARGIN_R).toInt()
         val height = (MARGIN_T + SPEC_H + MARGIN_B).toInt()
@@ -57,9 +57,9 @@ object SpectrogramExporter {
         drawTitle(canvas, result, text)
         drawFreqAxis(canvas, specRect, result.spectrogram.sampleRate, text, line)
         drawTimeAxis(canvas, specRect, result.spectrogram.let { it.frames.size * it.frameDurationSec }, text, line)
-        drawLegend(canvas, specRect, text, line)
+        drawLegend(canvas, specRect, dbCeil, text, line)
         drawCutoffMarker(canvas, specRect, result)
-        drawFooter(canvas, result, text)
+        drawFooter(canvas, result, dbCeil, text)
         return out
     }
 
@@ -137,7 +137,7 @@ object SpectrogramExporter {
         canvas.drawText("Time (m:ss)", r.centerX(), r.bottom + 70f, cap)
     }
 
-    private fun drawLegend(canvas: Canvas, r: RectF, text: Paint, line: Paint) {
+    private fun drawLegend(canvas: Canvas, r: RectF, dbCeil: Float, text: Paint, line: Paint) {
         val barLeft = r.right + 36f
         val barW = 28f
         // Gradient bar, top = 0 dB
@@ -150,9 +150,10 @@ object SpectrogramExporter {
         }
         canvas.drawRect(barLeft, r.top, barLeft + barW, r.bottom, line)
 
-        var db = 0
-        while (db >= DB_FLOOR.toInt()) {
-            val y = r.top + (-db / -DB_FLOOR) * r.height()
+        var db = dbCeil.toInt()
+        val floor = (dbCeil - DB_SPAN).toInt()
+        while (db >= floor) {
+            val y = r.top + ((dbCeil - db) / DB_SPAN) * r.height()
             canvas.drawLine(barLeft + barW, y, barLeft + barW + 6f, y, line)
             canvas.drawText("$db", barLeft + barW + 12f, y + 8f, text)
             db -= 20
@@ -187,14 +188,14 @@ object SpectrogramExporter {
         canvas.drawText(txt, r.right - 12f, ty, label)
     }
 
-    private fun drawFooter(canvas: Canvas, result: AnalysisResult, text: Paint) {
+    private fun drawFooter(canvas: Canvas, result: AnalysisResult, dbCeil: Float, text: Paint) {
         val i = result.info
         val s = result.spectrogram
-        val footer = "%d Hz · %d-bit · %d ch · %d:%02d · FFT %d Hann, hop %d · %.0f..0 dBFS · SpectralCheck"
+        val footer = "%d Hz · %d-bit · %d ch · %d:%02d · FFT %d Hann, hop %d · %.0f..%.0f dBFS · SpectralCheck"
             .format(
                 i.sampleRate, i.bitDepth, i.channels,
                 i.durationMs / 60000, i.durationMs / 1000 % 60,
-                s.fftSize, s.hopSize, DB_FLOOR,
+                s.fftSize, s.hopSize, dbCeil - DB_SPAN, dbCeil,
             )
         val p = Paint(text).apply { color = Color.rgb(150, 150, 150) }
         canvas.drawText(footer, MARGIN_L, MARGIN_T + SPEC_H + 106f, p)

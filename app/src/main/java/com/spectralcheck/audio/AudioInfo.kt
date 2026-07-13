@@ -5,6 +5,8 @@ data class AudioInfo(
     val channels: Int,
     val bitDepth: Int,
     val durationMs: Long,
+    /** What the codec actually emitted, e.g. "float PCM, peak -3.1 dB". */
+    val decoderOutput: String? = null,
 )
 
 class DecodedAudio(

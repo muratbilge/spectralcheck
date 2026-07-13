@@ -173,6 +173,7 @@ fun DetailScreen(viewModel: AnalysisViewModel) {
                             if (r.verdict.cutoff.sharpShelf) "(brick wall)" else "(gradual)",
                         ),
                     )
+                    r.info.decoderOutput?.let { InfoRow("Decoder output", it) }
                 }
             }
 
