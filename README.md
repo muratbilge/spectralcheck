@@ -94,3 +94,7 @@ SPECTRALCHECK_AUDIO_DIR=$D ./gradlew testDebugUnitTest \
 
 Expected: `real → AUTHENTIC`, `fake320 → SUSPICIOUS (~20.1 kHz)`,
 `fake128 → TRANSCODE (~16.7 kHz)`.
+
+## License
+
+[MIT](LICENSE)
