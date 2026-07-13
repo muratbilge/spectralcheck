@@ -20,6 +20,9 @@ class FlacDecoder(private val context: Context) {
      * @param maxDurationUs stop after this much audio, or Long.MAX_VALUE
      * @param keepStereo also return the individual L/R channels (2ch files)
      * @param onProgress called with decode progress in [0, 1]
+     * @param onMonoChunk when set, mono chunks are streamed to this callback
+     *   as they decode and NOT accumulated — the returned [DecodedAudio] has
+     *   empty samples. Keeps memory bounded for long hi-res tracks.
      */
     fun decode(
         uri: Uri,
@@ -27,6 +30,7 @@ class FlacDecoder(private val context: Context) {
         maxDurationUs: Long = Long.MAX_VALUE,
         keepStereo: Boolean = false,
         onProgress: ((Float) -> Unit)? = null,
+        onMonoChunk: ((FloatArray) -> Unit)? = null,
     ): DecodedAudio {
         val headerInfo = runCatching {
             context.contentResolver.openInputStream(uri)?.use { FlacHeaderParser.parse(it) }
@@ -52,28 +56,30 @@ class FlacDecoder(private val context: Context) {
             val mime = format.getString(MediaFormat.KEY_MIME)!!
 
             // For >16-bit files ask for float output so the bit-depth check
-            // can see the real resolution; fall back if the codec refuses.
+            // can see the real resolution; fall back to the default config if
+            // the codec refuses to configure OR start with float output.
             var codec = MediaCodec.createDecoderByType(mime)
-            var configured = false
+            var started = false
             if ((headerInfo?.bitDepth ?: 16) > 16) {
                 try {
                     format.setInteger(MediaFormat.KEY_PCM_ENCODING, AudioFormat.ENCODING_PCM_FLOAT)
                     codec.configure(format, null, null, 0)
-                    configured = true
+                    codec.start()
+                    started = true
                 } catch (e: Exception) {
-                    codec.release()
+                    runCatching { codec.release() }
                     codec = MediaCodec.createDecoderByType(mime)
                 }
             }
-            if (!configured) {
+            if (!started) {
                 codec.configure(extractor.getTrackFormat(trackIndex), null, null, 0)
+                codec.start()
             }
 
             try {
-                codec.start()
-                return drainCodec(codec, extractor, extractor.getTrackFormat(trackIndex), headerInfo, maxDurationUs, keepStereo, startUs, onProgress)
+                return drainCodec(codec, extractor, extractor.getTrackFormat(trackIndex), headerInfo, maxDurationUs, keepStereo, startUs, onProgress, onMonoChunk)
             } finally {
-                codec.stop()
+                runCatching { codec.stop() }
                 codec.release()
             }
         } finally {
@@ -90,6 +96,7 @@ class FlacDecoder(private val context: Context) {
         keepStereo: Boolean,
         startUs: Long,
         onProgress: ((Float) -> Unit)?,
+        onMonoChunk: ((FloatArray) -> Unit)?,
     ): DecodedAudio {
         val remainingUs = (headerInfo?.durationMs?.times(1000) ?: Long.MAX_VALUE) - startUs
         val totalUs = minOf(maxDurationUs, remainingUs).coerceAtLeast(1)
@@ -158,7 +165,7 @@ class FlacDecoder(private val context: Context) {
                                 mono[i] = sum / channels
                             }
                         }
-                        monoChunks.add(mono)
+                        if (onMonoChunk != null) onMonoChunk(mono) else monoChunks.add(mono)
                         totalSamples += frames
 
                         if (keepStereo && channels == 2) {

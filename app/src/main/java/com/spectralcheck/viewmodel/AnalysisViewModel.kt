@@ -89,8 +89,12 @@ class AnalysisViewModel(application: Application) : AndroidViewModel(application
                     }
                     val bitmap = com.spectralcheck.ui.SpectrogramBitmap.render(result.spectrogram)
                     AnalysisUiState.Ready(result, bitmap, decodeCover(result.metadata.coverArt))
-                } catch (e: Exception) {
-                    AnalysisUiState.Error(e.message ?: "Analysis failed")
+                } catch (e: kotlinx.coroutines.CancellationException) {
+                    throw e
+                } catch (e: Throwable) {
+                    // Throwable, not Exception: OutOfMemoryError must land on
+                    // the error screen instead of killing the app.
+                    AnalysisUiState.Error(e.message ?: e.javaClass.simpleName)
                 }
             }
         }

@@ -12,6 +12,8 @@ import com.spectralcheck.audio.FlacMetadataParser
 import com.spectralcheck.audio.TrackMetadata
 import com.spectralcheck.dsp.SpectrogramData
 import com.spectralcheck.dsp.Stft
+import com.spectralcheck.dsp.StreamingStft
+import com.spectralcheck.dsp.chooseHop
 
 class AnalysisResult(
     val fileName: String,
@@ -22,6 +24,8 @@ class AnalysisResult(
 )
 
 private const val WINDOW_US = 30_000_000L
+private const val FFT_SIZE = 4096
+private const val BASE_HOP = 2048
 
 /** Ties together decode → STFT → signal extraction → verdict. */
 class Analyzer(private val context: Context) {
@@ -37,12 +41,23 @@ class Analyzer(private val context: Context) {
      * @param onProgress called with a stage label and overall progress [0, 1]
      */
     fun analyzeFull(uri: Uri, onProgress: ((String, Float) -> Unit)? = null): AnalysisResult {
-        onProgress?.invoke("Decoding", 0f)
-        val full = decoder.decode(uri) { p -> onProgress?.invoke("Decoding", p * 0.45f) }
-        onProgress?.invoke("Analyzing spectrum", 0.45f)
-        val spectrogram = stft.analyze(full.samples, full.info.sampleRate) { p ->
-            onProgress?.invoke("Analyzing spectrum", 0.45f + p * 0.40f)
-        }
+        onProgress?.invoke("Decoding & analyzing", 0f)
+
+        // Stream frames as the track decodes so the whole PCM never sits in
+        // memory; the hop widens on long/hi-res tracks to bound the frame grid.
+        val header = runCatching {
+            context.contentResolver.openInputStream(uri)?.use { FlacHeaderParser.parse(it) }
+        }.getOrNull()
+        val totalSamples = header?.let { it.durationMs * it.sampleRate / 1000 } ?: 0L
+        val streaming = StreamingStft(FFT_SIZE, chooseHop(totalSamples, FFT_SIZE, BASE_HOP))
+
+        val full = decoder.decode(
+            uri,
+            onProgress = { p -> onProgress?.invoke("Decoding & analyzing", p * 0.85f) },
+            onMonoChunk = { streaming.feed(it) },
+        )
+        val spectrogram = streaming.finish(full.info.sampleRate)
+
         onProgress?.invoke("Checking stereo & bit depth", 0.85f)
         val window = runCatching {
             decoder.decode(uri, midTrackStartUs(full.info.durationMs), WINDOW_US, keepStereo = true)

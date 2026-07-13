@@ -76,10 +76,12 @@ class BatchScanViewModel(application: Application) : AndroidViewModel(applicatio
                                 title = r.metadata.title,
                                 artist = r.metadata.artist,
                             )
-                        } catch (e: Exception) {
+                        } catch (e: kotlinx.coroutines.CancellationException) {
+                            throw e
+                        } catch (e: Throwable) {
                             BatchItem(
                                 entry.uri, entry.name, null, null, null,
-                                error = e.message ?: "failed",
+                                error = e.message ?: e.javaClass.simpleName,
                             )
                         }
                         results.add(item)
