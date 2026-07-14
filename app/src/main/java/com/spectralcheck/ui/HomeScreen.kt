@@ -40,5 +40,11 @@ fun HomeScreen(
         OutlinedButton(onClick = onPickFolder, modifier = Modifier.fillMaxWidth()) {
             Text("Scan a folder")
         }
+        Spacer(Modifier.height(32.dp))
+        Text(
+            "v${com.spectralcheck.BuildConfig.VERSION_NAME}",
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
     }
 }
